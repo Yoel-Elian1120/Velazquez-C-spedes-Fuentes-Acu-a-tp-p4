@@ -10,6 +10,15 @@ import java.awt.Color;
 import java.awt.Image;
 import java.util.Random;
 
+// --- ¡AGREGADAS! Importaciones para MIDI ---
+import java.io.IOException;
+import javax.sound.midi.InvalidMidiDataException;
+import javax.sound.midi.MidiSystem;
+import javax.sound.midi.MidiUnavailableException;
+import javax.sound.midi.Sequence;
+import javax.sound.midi.Sequencer;
+// --- FIN DE IMPORTACIONES MIDI ---
+
 public class Juego extends InterfaceJuego {
 
 	// -----------------------------------------------------------------
@@ -99,6 +108,11 @@ public class Juego extends InterfaceJuego {
 	private double explosionX;
 	private double explosionY;
 
+	// --- ¡AGREGADOS! Atributos para MIDI ---
+	private Sequence secuencia;
+	private Sequencer secuenciador;
+	// --- FIN ATRIBUTOS MIDI ---
+
 	// -----------------------------------------------------------------
 	// 2. CONSTRUCTOR Y MÉTODO MAIN
 	// -----------------------------------------------------------------
@@ -122,7 +136,7 @@ public class Juego extends InterfaceJuego {
 	    
 	    // --- ¡NUEVO! CALCULAR ESCALA DEL PANEL DE STATS ---
 	    // (Ajusta estos '200' y '90' al tamaño que QUIERES que tenga en pantalla)
-	   
+	    
 	    // --- FIN DE LO NUEVO ---
 
 	    this.escalaZombieNormal = calcularEscalaImagen(this.imgCartaZombieNormal, ANCHO_CARTA_HUD, ALTO_CARTA_HUD);
@@ -158,6 +172,37 @@ public class Juego extends InterfaceJuego {
 	    this.bolasDeNieve = new BolaDeNieve[100];
 	    this.items = new Item[20];
 	    this.jefeFinal = null; 
+
+		// --- ¡AGREGADO! Bloque de carga de MIDI ---
+		// Cargar y reproducir la música MIDI (Sección 4.2.2)
+	 // --- ¡AGREGADO! Bloque de carga de MIDI (Versión InputStream) ---
+	 		try { 
+	 		   
+	 		   // 1. Obtenemos el archivo como un "flujo de datos" (más fiable)
+	 		   java.io.InputStream midiStream = ClassLoader.getSystemResourceAsStream("sup.mid");
+	 		   
+	 		   // 2. Cargamos el flujo directamente
+	 		   this.secuencia = MidiSystem.getSequence(midiStream); 
+	 		    
+	 		   this.secuenciador = MidiSystem.getSequencer(); 
+	 		   this.secuenciador.open(); 
+	 		   this.secuenciador.setSequence(this.secuencia); 
+	 		   this.secuenciador.setTempoFactor(1.0f); // 1.0f es velocidad normal
+	 		   this.secuenciador.setLoopCount(Sequencer.LOOP_CONTINUOUSLY); // Repetir indefinidamente
+	 		   this.secuenciador.start(); 
+	 		  } 
+	 		  catch (NullPointerException e) {
+	 			  // Esto pasará si 'midiStream' es nulo (no encontró el archivo)
+	 			  System.out.println("Error al cargar MIDI: No se encontró el archivo 'end.mid' en src/");
+	 			  e.printStackTrace();
+	 		  }
+	 		  catch (InvalidMidiDataException | IOException | MidiUnavailableException e) { 
+	 			  // Esto pasará si el archivo está dañado o hay un problema de sonido
+	 		   	  System.out.println("Error al cargar el archivo MIDI 'end.mid': " + e.getMessage());
+	 		   	  e.printStackTrace(); 
+	 		  }
+	 		// --- FIN DEL BLOQUE MIDI ---
+		// --- FIN DEL BLOQUE MIDI ---
 
 	    // Inicia el juego!
 	    this.entorno.iniciar();
@@ -262,51 +307,105 @@ public class Juego extends InterfaceJuego {
 	// 5. MÉTODOS DE LÓGICA (Llamados desde tick())
 	// -----------------------------------------------------------------
 
-	private void manejarInput(long tiempoActual) {
-		// --- Req 2: Arrastrar y Soltar ---
+private void manejarInput(long tiempoActual) {
+		
+		// --- 1. LÓGICA DE PRESIONAR EL MOUSE ---
 		if (entorno.sePresionoBoton(entorno.BOTON_IZQUIERDO)) {
 			
+			// Primero, chequear si se clickeó el HUD para plantar
 			for (int i = 0; i < cartasHUD.length; i++) {
 				if (cartasHUD[i].fueClickeada(entorno.mouseX(), entorno.mouseY()) &&
 						cartasHUD[i].estaLista(tiempoActual)) {
 					this.plantaArrastrando = cartasHUD[i];
-					this.plantaSeleccionadaParaMover = null;
+					this.plantaSeleccionadaParaMover = null; // Deselecciona cualquier otra
 					break;	
 				}
 			}
 
+			// Si no se clickeó el HUD, chequear si se clickeó un item
 			if (this.plantaArrastrando == null) {
 				boolean itemClickeado = chequearClickItem();
+				
+				// Si no fue un item, chequear si se clickeó una PLANTA en el tablero
 				if (!itemClickeado) {
+					// Este método PONE una planta en 'plantaSeleccionadaParaMover'
+					// si se hace clic sobre ella, o la pone en NULL si se clickea pasto.
 					manejarInputSeleccionPlanta();
 				}
 			}
 		}
 
-		if (this.plantaArrastrando != null &&
-				entorno.seLevantoBoton(entorno.BOTON_IZQUIERDO)) {
-			int[] celda = pixelACelda(entorno.mouseX(), entorno.mouseY());
-			int f = celda[0];
-			int c = celda[1];
-			
-			if (esCeldaValidaParaPlantar(f, c)) {	
-				double x = celdaAPixelX(c);
-				double y = celdaAPixelY(f);
-				if (this.plantaArrastrando.getTipo().equals("rosablade")) {
-					this.tablero[f][c].ocupante = new RoseBlade(x, y, f, c);
-				} else if (this.plantaArrastrando.getTipo().equals("wallnut")) {
-					this.tablero[f][c].ocupante = new WallNut(x, y, f, c);
-				}
-				else if (this.plantaArrastrando.getTipo().equals("explosiva")) {
-					this.tablero[f][c].ocupante = new PlantaExplosiva(x, y, f, c);
-				}
+		// --- 2. LÓGICA DE SOLTAR EL MOUSE ---
+		if (entorno.seLevantoBoton(entorno.BOTON_IZQUIERDO)) {
+
+			// --- Caso A: Estaba arrastrando una NUEVA planta (desde el HUD) ---
+			if (this.plantaArrastrando != null) {
+				int[] celda = pixelACelda(entorno.mouseX(), entorno.mouseY());
+				int f = celda[0];
+				int c = celda[1];
 				
-				this.plantaArrastrando.iniciarRecarga(tiempoActual);
+				if (esCeldaValidaParaPlantar(f, c)) {	
+					double x = celdaAPixelX(c);
+					double y = celdaAPixelY(f);
+					if (this.plantaArrastrando.getTipo().equals("rosablade")) {
+						this.tablero[f][c].ocupante = new RoseBlade(x, y, f, c);
+					} else if (this.plantaArrastrando.getTipo().equals("wallnut")) {
+						this.tablero[f][c].ocupante = new WallNut(x, y, f, c);
+					}
+					else if (this.plantaArrastrando.getTipo().equals("explosiva")) {
+						this.tablero[f][c].ocupante = new PlantaExplosiva(x, y, f, c);
+					}
+					
+					this.plantaArrastrando.iniciarRecarga(tiempoActual);
+				}
+				this.plantaArrastrando = null; // Termina el arrastre
 			}
-			this.plantaArrastrando = null;
+			
+			// --- Caso B: Estaba moviendo una planta EXISTENTE (¡NUEVA LÓGICA!) ---
+			else if (this.plantaSeleccionadaParaMover != null) {
+				
+				// Celda original (donde estaba la planta)
+				int f_actual = this.plantaSeleccionadaParaMover.getFila();
+				int c_actual = this.plantaSeleccionadaParaMover.getCol();
+
+				// Celda destino (donde se soltó el mouse)
+				int[] celdaDestino = pixelACelda(entorno.mouseX(), entorno.mouseY());
+				int f_nueva = celdaDestino[0];
+				int c_nueva = celdaDestino[1];
+
+				if (f_nueva == f_actual && c_nueva == c_actual) {
+					// **Sub-caso 1: Se soltó en la MISMA celda.**
+					// El usuario solo hizo clic, quiere usar las teclas (WASD).
+					// No hacemos nada, la planta sigue seleccionada.
+				}
+				else if (esCeldaValidaParaPlantar(f_nueva, c_nueva)) {
+					// **Sub-caso 2: Se soltó en una NUEVA celda válida.**
+					// ¡Movemos la planta!
+					
+					Planta plantaAMover = this.plantaSeleccionadaParaMover;
+
+					// Actualizamos sus coordenadas y fila/col
+					plantaAMover.actualizarPosicion(celdaAPixelX(c_nueva), celdaAPixelY(f_nueva), f_nueva, c_nueva);
+					
+					// La movemos en el tablero
+					this.tablero[f_nueva][c_nueva].ocupante = plantaAMover;
+					this.tablero[f_actual][c_actual].ocupante = null; // Vaciar la celda vieja
+
+					// Deseleccionamos, ya que el movimiento se completó
+					this.plantaSeleccionadaParaMover = null;
+				}
+				else {
+					// **Sub-caso 3: Se soltó en un LUGAR INVÁLIDO.**
+					// (Fuera del tablero, en la columna 0, o celda ocupada)
+					// Se cancela la acción. Deseleccionamos la planta.
+					this.plantaSeleccionadaParaMover = null;
+				}
+			}
 		}
 
-		// --- Req 3: Mover Planta Seleccionada ---
+		// --- 3. LÓGICA DE MOVER CON TECLADO (WASD) ---
+		// Esta parte solo se ejecutará si la planta sigue seleccionada
+		// (es decir, si el usuario está en el "Sub-caso 1").
 		if (this.plantaSeleccionadaParaMover != null) {
 			manejarInputMoverPlanta();
 		}
@@ -858,7 +957,7 @@ public class Juego extends InterfaceJuego {
 	    } catch (Exception e) {
 	        entorno.cambiarFont("Arial", 18, Color.WHITE); // Fallback
 	    }
-	    entorno.escribirTexto("NIVEL: " + this.nivelActual, centroX - 80, 55); 
+	    entorno.escribirTexto("NIVEL: " + this.nivelActual, centroX - 80, 30); 
 
 	    // Dibuja la carta del Zombie Normal (siempre)
 	    if (this.imgCartaZombieNormal != null) {
@@ -895,10 +994,10 @@ public class Juego extends InterfaceJuego {
 
 	        // --- AJUSTA ESTAS POSICIONES PARA QUE CAIGAN EN CADA TABLÓN ---
 	        // (Tendrás que probar y ajustar los valores 'Y' para que queden centrados)
-	        int textoX = (int)(panelStatsX - 80); // Posición X del texto (a la izquierda del centro del cartel)
-	        int textoY_Eliminados = (int)panelStatsY - 30; // Primer tablón
-	        int textoY_Restantes  = (int)panelStatsY + 0;  // Segundo tablón
-	        int textoY_Tiempo     = (int)panelStatsY + 30; // Tercer tablón
+	        int textoX = (int)(panelStatsX - 70); // Posición X del texto (a la izquierda del centro del cartel)
+	        int textoY_Eliminados = (int)panelStatsY - 5; // Primer tablón
+	        int textoY_Restantes  = (int)panelStatsY + 20;  // Segundo tablón
+	        int textoY_Tiempo     = (int)panelStatsY + 45; // Tercer tablón
 
 	        entorno.escribirTexto("ELIMINADOS: " + this.zombiesEliminados, textoX, textoY_Eliminados);
 	        entorno.escribirTexto("RESTANTES: " + zombiesRestantes, textoX, textoY_Restantes);
