@@ -1,0 +1,15 @@
+# Ignorar archivos compilados de Java
+/bin/
+*.class
+
+# Ignorar archivos de Eclipse
+.project
+.classpath
+.settings/
+
+# Ignorar archivos comprimidos
+*.rar
+*.zip
+
+# Ignorar otros archivos de sistema
+.DS_Store
